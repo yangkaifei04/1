@@ -1,3 +1,4 @@
+
 PROJ	:= lab1
 EMPTY	:=
 SPACE	:= $(EMPTY) $(EMPTY)
@@ -227,3 +228,4 @@ tags:
 	$(V)find . -type f -name "*.[chS]" >cscope.files
 	$(V)cscope -bq 
 	$(V)ctags -L cscope.files
+
