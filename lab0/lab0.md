@@ -3,10 +3,10 @@
 
 ##### 开始调试
 首先打开gdb进行调试。首先使用`make debug`指令挂起，`make gdb`指令开始调试。
-![[Pasted image 20240925002025.png]]
+![[photos/Pasted image 20240925002025.png]]
 此时pc的值为0x1000，使用`x/10i &pc`指令查看即将执行的十条指令
 
-![[Pasted image 20240925002235.png]]
+![[photos/Pasted image 20240925002235.png]]
 
 
 ##### 指令解析
@@ -17,18 +17,18 @@
 4. `0x100c: ld a1,32(t0)`：从`t0+32`的内存地址加载一个字（4字节）到寄存器`a1`。`ld`（Load）指令用于从内存加载数据。
     
 5. `0x1010: ld t0,24(t0)`：从`t0+24`（0x1018）的内存地址加载一个字到寄存器`t0`。我们在这里用`x/10xw $pc`指令查看0X1018的值，为0x80000000。
-![[Pasted image 20240925014231.png]]
+![[photos/Pasted image 20240925014231.png]]
 6. `0x1014: jr t0`：跳转到寄存器`t0`指向的地址执行。`jr`（Jump Register）指令用于跳转。此时查看t0的值，即为跳转地址。
-![[Pasted image 20240925011745.png]]
+![[photos/Pasted image 20240925011745.png]]
 
-![[Pasted image 20240925010502.png]]
+![[photos/Pasted image 20240925010502.png]]
 
 
 
 
 #### 0x80000000处的指令
 
-![[Pasted image 20240925012028.png]]
+![[photos/Pasted image 20240925012028.png]]
 
 首先在跳转之后，我们查看即将执行的十条指令，在0x802000000处设置断点并执行到断点.
 
@@ -44,7 +44,7 @@
 这个阶段
 
 
-![[Pasted image 20240925012516.png]]
+![[photos/Pasted image 20240925012516.png]]
 
 通过设置断点，我们发现启动函数似乎是kern/init/entry.s,打开这个文件进行查看。
 ```
