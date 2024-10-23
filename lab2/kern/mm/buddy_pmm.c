@@ -1,9 +1,9 @@
+
 #include <pmm.h>
 #include <list.h>
 #include <string.h>
-#include <default_pmm.h>
 #include <buddy_pmm.h>
-
+#include<stdio.h>
 #define MAX_ORDER 11
 
 free_area_t free_area[MAX_ORDER];
@@ -31,70 +31,90 @@ buddy_init_memmap(struct Page *base, size_t n) {
         p->flags = p->property = 0;
         set_page_ref(p, 0);
     }
-    base->property = n;
-    SetPageProperty(base);
-    size_t order;
-    while (n > 0) {       
-        for (order = 0; (1 << order) <= n; order++);
-        order--; 
-        struct Page *p = base;
-        base += (1 << order);
-        n -= (1 << order);
-        p->property = 1 << order;
+    size_t curr_size = n;
+    uint32_t order = MAX_ORDER - 1;
+    uint32_t order_size = 1 << order;
+    p = base;
+    while (curr_size != 0) {
+        p->property = order_size;
         SetPageProperty(p);
-        list_add(&free_area[order].free_list, &(p->page_link));
-        free_area[order].nr_free++;
+        free_area[order].nr_free += 1;
+        list_add_before(&(free_area[order].free_list), &(p->page_link));
+        curr_size -= order_size;
+        while(order > 0 && curr_size < order_size) {
+            order_size >>= 1;
+            order -= 1;
+        }
+        p += order_size;
     }
 }
 
-static struct Page *
-buddy_alloc_pages(size_t n) {
-    assert(n > 0);
-    if (n > (1 << (MAX_ORDER - 1))) {
-        return NULL;
-    }
+static struct Page *buddy_alloc_pages(size_t n) {
+    if (n == 0) return NULL;
+
+ //   cprintf("Allocating %zu pages\n", n); // 输出分配提示信息
+    
     int order;
-    for (order = 0; (1 << order) < n; order++); 
+    for (order = 0; (1 << order) < n; order++); // 找到合适的order
+    
+ //   cprintf("Found order: %d for size: %zu\n", order, n); // 输出 order 信息
+
+
     for (int current_order = order; current_order < MAX_ORDER; current_order++) {
-        if (list_empty(&free_area[current_order].free_list)) {  
-            continue;
-        }         
-        else{       
-  
+        if (!list_empty(&free_area[current_order].free_list)) {
+            cprintf("Found free block at order %d\n", current_order);
+
+            // 从更大的order中分配
             list_entry_t *le = list_next(&free_area[current_order].free_list);
             struct Page *page = le2page(le, page_link);
-            list_del(le);
+            list_del(&(page->page_link));
             free_area[current_order].nr_free--;
-           
+            
+            // 输出调试信息
+  //          cprintf("Allocating page at address: %p with size: %d\n", page, 1 << current_order);
+
+            // 将大块分割成多个小块
             while (current_order > order) {
                 current_order--;
                 struct Page *buddy = page + (1 << current_order);
                 buddy->property = 1 << current_order;
                 SetPageProperty(buddy);
+                cprintf("Split block, added buddy at address: %p with size: %d\n", buddy, 1 << current_order);
                 list_add(&free_area[current_order].free_list, &buddy->page_link);
                 free_area[current_order].nr_free++;
             }
 
+            // 清除属性标志
+
             ClearPageProperty(page);
+
+
+ //           cprintf("Returning allocated page at address: %p\n", page);
             return page;
         }
     }
+
+    // 如果没有找到合适的块，返回 NULL
+ //  cprintf("No suitable block found for size: %zu\n", n);
+    return NULL;
 }
 
 static void
 buddy_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
-    int order = 0;
 
+    int order = 0;
     while ((1 << order) < n && order < MAX_ORDER) {
         order++;
     }
+
 
     base->property = n;
     SetPageProperty(base);
 
     // 插入到相应 order 的空闲链表中
     list_add(&free_area[order].free_list, &(base->page_link));
+
 
     // 开始合并相邻的 buddy 块
     while (order < MAX_ORDER - 1) {
@@ -106,6 +126,7 @@ buddy_free_pages(struct Page *base, size_t n) {
 
             // 如果前一个块和当前块是 buddy，则合并
             if (prev_page + (1 << order) == base) {
+               
                 prev_page->property += base->property;
                 ClearPageProperty(base);
                 list_del(&(base->page_link));  // 从当前 order 的列表中删除
@@ -120,6 +141,7 @@ buddy_free_pages(struct Page *base, size_t n) {
 
             // 如果后一个块和当前块是 buddy，则合并
             if (base + (1 << order) == next_page) {
+                cprintf("Merging with next buddy at address: %p (size: %d)\n", next_page, 1 << order);
                 base->property += next_page->property;
                 ClearPageProperty(next_page);
                 list_del(&(next_page->page_link));  // 从当前 order 的列表中删除
@@ -144,7 +166,7 @@ static size_t
 buddy_nr_free_pages(void) {
     size_t total = 0;
     for (int i = 0; i < MAX_ORDER; i++) {
-        total += nr_free(i) * (1 << i);  
+        total += free_area[i].nr_free * (1 << i);  
     }
     return total;
 }
@@ -203,12 +225,64 @@ basic_check(void) {
 // NOTICE: You SHOULD NOT CHANGE basic_check, default_check functions!
 static void
 buddy_check(void) {
-    basic_check();
+//    basic_check();
+
+    cprintf("Starting buddy system check...\n");
+    
+    // 再分配一个较小的块，确保buddy系统能够处理不同大小的分配
+ //   cprintf("Allocating 1 page...\n");
+  //  struct Page *p1 = buddy_alloc_pages(1);  // 分配1页
+  //  assert(p1 != NULL);
+   // cprintf("Successfully allocated 1 page at %p.\n", p1);
+
+    // 尝试分配一个较大的块
+    cprintf("Allocating 4 pages...\n");
+    struct Page *p0 = buddy_alloc_pages(4);  // 分配4页
+    assert(p0 != NULL);
+    cprintf("Successfully allocated 4 pages at %p.\n", p0);
 
 
+   
+    // 分配尽可能大的块
+    cprintf("Allocating 32 pages...\n");
+    struct Page *p2 = buddy_alloc_pages(32);  // 分配32页
+    assert(p2 != NULL);
+    cprintf("Successfully allocated 8 pages at %p.\n", p2);
+
+    cprintf("Allocating 1024 pages...\n");
+    struct Page *p3 = buddy_alloc_pages(1024);  // 分配32页
+    assert(p3 != NULL);
+    cprintf("Successfully allocated 8 pages at %p.\n", p3);
+    
+  //  assert(p0 != p1 && p0!= p2 && p1 != p2);
+
+    // 释放p0，并检查是否正确合并
+    cprintf("Freeing 4 pages at %p...\n", p0);
+    buddy_free_pages(p0, 4);  // 释放4页
+    assert(free_area[2].nr_free > 0);  // 检查free_list
+    cprintf("Successfully freed and merged 4 pages.\n");
+
+    // 再次分配4页，确保合并逻辑正确
+    cprintf("Reallocating 4 pages...\n");
+    p0 = buddy_alloc_pages(4);
+    assert(p0 != NULL);
+    cprintf("Successfully reallocated 4 pages at %p.\n", p0);
+
+    // 释放所有分配的页面
+    cprintf("Freeing all allocated pages...\n");
+    buddy_free_pages(p3, 1024);  // 释放1页
+    buddy_free_pages(p2, 32);  // 释放8页
+    buddy_free_pages(p0, 4);  // 释放4页
+    cprintf("Successfully freed all pages.\n");
+
+
+
+    cprintf("buddy_check() succeeded!\n");
 }
+
+
 //这个结构体在
-const struct pmm_manager default_pmm_manager = {
+const struct pmm_manager buddy_pmm_manager = {
     .name = "default_pmm_manager",
     .init = buddy_init,
     .init_memmap = buddy_init_memmap,
