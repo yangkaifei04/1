@@ -84,39 +84,61 @@ buddy_alloc_pages(size_t n) {
 static void
 buddy_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
+    int order = 0;
 
-    struct Page *p = base;
-    for (; p != base + n; p ++) {
-        assert(!PageReserved(p) && !PageProperty(p));
-        p->flags = 0;
-        set_page_ref(p, 0);
-    }
-
-    int order;
-    for (order = 0; (1 << order) < n; order++); 
-    base->property = 1 << order;
-    SetPageProperty(base);
-
-    while (order < MAX_ORDER - 1) {
-        uintptr_t buddy_addr = (uintptr_t)base ^ (1 << (PGSHIFT + order));
-        struct Page *buddy = pa2page(buddy_addr);
-
-        if (!PageProperty(buddy) || buddy->property != (1 << order)) {
-            break; 
-        }
-
-        
-        list_del(&buddy->page_link);
-        free_area[order].nr_free--;
-        if (buddy < base) {
-            base = buddy;
-        }
+    while ((1 << order) < n && order < MAX_ORDER) {
         order++;
     }
 
-    list_add(&free_area[order].free_list, &base->page_link);
-    free_area[order].nr_free++;
+    base->property = n;
+    SetPageProperty(base);
+
+    // 插入到相应 order 的空闲链表中
+    list_add(&free_area[order].free_list, &(base->page_link));
+
+    // 开始合并相邻的 buddy 块
+    while (order < MAX_ORDER - 1) {
+        list_entry_t* le = list_prev(&(base->page_link));
+
+        // 检查是否有相邻的前一个块可以合并
+        if (le != &(free_area[order].free_list)) {
+            struct Page *prev_page = le2page(le, page_link);
+
+            // 如果前一个块和当前块是 buddy，则合并
+            if (prev_page + (1 << order) == base) {
+                prev_page->property += base->property;
+                ClearPageProperty(base);
+                list_del(&(base->page_link));  // 从当前 order 的列表中删除
+                base = prev_page;  // 更新 base 为合并后的块
+            }
+        }
+
+        // 再检查后一个块是否可以合并
+        le = list_next(&(base->page_link));
+        if (le != &(free_area[order].free_list)) {
+            struct Page *next_page = le2page(le, page_link);
+
+            // 如果后一个块和当前块是 buddy，则合并
+            if (base + (1 << order) == next_page) {
+                base->property += next_page->property;
+                ClearPageProperty(next_page);
+                list_del(&(next_page->page_link));  // 从当前 order 的列表中删除
+            }
+        }
+
+        // 如果没有更多 buddy 可以合并，退出循环
+        if (list_next(&(base->page_link)) == &(free_area[order].free_list) &&
+            list_prev(&(base->page_link)) == &(free_area[order].free_list)) {
+            break;
+        }
+
+        // 如果可以合并到更高的 order，则继续合并
+        list_del(&(base->page_link));
+        order++;
+        list_add(&free_area[order].free_list, &(base->page_link));
+    }
 }
+
 
 static size_t
 buddy_nr_free_pages(void) {
