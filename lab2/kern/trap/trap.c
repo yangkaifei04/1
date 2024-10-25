@@ -8,8 +8,10 @@
 #include <riscv.h>
 #include <stdio.h>
 #include <trap.h>
+#include <sbi.h>
 
 #define TICK_NUM 100
+volatile size_t num=0;
 
 static void print_ticks() {
     cprintf("%d ticks\n", TICK_NUM);
@@ -126,10 +128,20 @@ void interrupt_handler(struct trapframe *tf) {
             // cprintf("Supervisor timer interrupt\n");
             // clear_csr(sip, SIP_STIP);
             clock_set_next_event();
-            if (++ticks % TICK_NUM == 0) {
-                print_ticks();
+            //if (++ticks % TICK_NUM == 0) {
+            //   print_ticks();
+            //}
+            
+            if(ticks++ % TICK_NUM == 0){
+                print_ticks(); //打印
+                num++; //打印次数加一
             }
-            break;
+            else if(num == 10){
+                sbi_shutdown(); //当打印次数为10时，调用<sbi.h>中的关机函数关机
+            }
+
+            break;            
+            
         case IRQ_H_TIMER:
             cprintf("Hypervisor software interrupt\n");
             break;
