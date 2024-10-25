@@ -4,6 +4,32 @@
 
 本实验依赖实验1。请把你做的实验1的代码填入本实验中代码中有“LAB1”的注释相应部分并按照实验手册进行进一步的修改。具体来说，就是跟着实验手册的教程一步步做，然后完成教程后继续完成完成exercise部分的剩余练习。
 
+/lab2/kern/trap/trap.c添加中断
+```c++
+#include <sbi.h>
+volatile size_t num=0;
+```
+```c++
+   case IRQ_S_TIMER:
+        clock_set_next_event();
+        if(ticks++ % TICK_NUM == 0){
+            print_ticks(); //打印
+            num++; //打印次数加一
+        }
+        else if(num == 10){
+            sbi_shutdown(); //当打印次数为10时，调用<sbi.h>中的关机函数关机
+        }
+
+        break; 
+```
+/lab2/libs/sbi.c最后添加关机函数
+```c++
+void sbi_shutdown(void)
+{
+    sbi_call(SBI_SHUTDOWN,0,0,0);
+}
+```
+
 ### 练习1：理解first-fit 连续物理内存分配算法（思考题）
 first-fit 连续物理内存分配算法作为物理内存分配一个很基础的方法，需要同学们理解它的实现过程。请大家仔细阅读实验手册的教程并结合`kern/mm/default_pmm.c`中的相关代码，认真分析default_init，default_init_memmap，default_alloc_pages， default_free_pages等相关函数，并描述程序在进行物理内存分配的过程以及各个函数的作用。
 请在实验报告中简要说明你的设计实现过程。请回答如下问题：
@@ -11,11 +37,11 @@ first-fit 连续物理内存分配算法作为物理内存分配一个很基础�
 
 
 
-#### 2. `default_init()`
+#### 1. `default_init()`
 - 初始化 `free_list` 链表，将其设为空。
 - `nr_free = 0` 将空闲页面的计数器初始化为 0。
 
-#### 3. `default_init_memmap()`
+#### 2. `default_init_memmap()`
 
 用来初始化一段连续的物理页面（`base` 开始，共 `n` 页），其实就是把这一整块完整的内存直接放进了空闲列表。
 - 将每个页面的 `flags` 和 `property` 字段清零，并将引用计数设为 0。
@@ -23,25 +49,69 @@ first-fit 连续物理内存分配算法作为物理内存分配一个很基础�
 - `nr_free += n` 增加空闲页面计数器。
 - 按照页面地址的顺序进行插入。
 
-#### 4. `default_alloc_pages()`
+#### 3. `default_alloc_pages()`
 
 - 分配 `n` 个连续的页面。
 - 若果空闲页不够分，返回 `NULL`。
 - 遍历 `free_list`，查找具有至少 `n` 个空闲页面的块。
 - 找到满足条件的页面块（第一个被查找到的）后，将其从链表中移除。如果块大小大于 `n`，则进行分割，剩余部分会被重新插入到链表中。
 
-#### 5. `default_free_pages()`
+#### 4. `default_free_pages()`
 
 是释放页面的函数，将从 `base` 开始的 `n` 个页面释放。
 - 清零 `flags` 。
 - 将释放的页面块插入 `free_list` 链表中，同时检查相邻块是否连续，尝试与前后相邻的空闲块合并，以避免碎片化。
 
-
+##### 算法进一步的改进空间
+搜索策略优化：可以考虑使用平衡树
 
 #### 练习2：实现 Best-Fit 连续物理内存分配算法（需要编程）
 在完成练习一后，参考kern/mm/default_pmm.c对First Fit算法的实现，编程实现Best Fit页面分配算法，算法的时空复杂度不做要求，能通过测试即可。
 请在实验报告中简要说明你的设计实现过程，阐述代码是如何对物理内存进行分配和释放，并回答如下问题：
 - 你的 Best-Fit 算法是否有进一步的改进空间？
+- #### 设计实现过程
+best_fit与first_fit相比只需要修改分配函数中的判断截至条件，其他部分代码按照first_fit编写即可。
+
+在first_fit中，当空闲块大于等于请求大小时，即停止查找；但在best_fit中，需要找到大于等于请求大小的空闲块中最小的那一个，
+⽤min_size存储了当前找到的最⼩连续空闲⻚框数量，原来first-fit⽅法中的break要去掉，因为需要去遍历全部free_list才能确定哪个是最⼩的。
+```c++
+   /*LAB2 EXERCISE 2: YOUR CODE*/ 
+  // 下面的代码是first-fit的部分代码，请修改下面的代码改为best-fit
+  // 遍历空闲链表，查找满足需求的空闲页框
+  // 如果找到满足需求的页面，记录该页面以及当前找到的最小连续空闲页框数量
+  while ((le = list_next(le)) != &free_list) {
+      struct Page *p = le2page(le, page_link);
+      if (p->property >= n && p->property < min_size) {
+          page = p;
+          min_size = p->property;
+          //break;
+      }
+  }
+```
+##### 运行结果
+![alt text](photos/2-1.png)
+![alt text](photos/2-2.png)
+make grade后
+![alt text](photos/2-3.png)
+
+- #### 如何对物理内存进行分配和释放
+在代码中，物理内存的分配和释放主要通过操作 struct Page 和 free_list 来完成：
+
+**分配过程**:
+在 best_fit_alloc_pages 中，查找空闲链表中的块，并检查其 property 是否满足请求的大小。如果找到合适的块，更新该块的 property，将其标记为已分配，同时更新空闲块的数量 nr_free。
+
+**释放过程:**
+在 best_fit_free_pages 中，释放指定的页面块，重置其属性，并将其重新插入到 free_list。在插入时，会检查是否可以与相邻的空闲块合并，更新合并后的块的大小。
+
+- #### Best-Fit 算法进一步的改进空间
+**1.搜索策略优化**
+可以考虑使用平衡树
+
+**2.碎⽚管理**
+尽可能地合并相邻的空闲内存块，减少内存碎片。
+
+**3.延迟合并**
+可以延迟合并相邻的空闲页，直到在分配请求时访问空闲链表。这可以在高频率释放操作期间减少开销。
 
 #### 扩展练习Challenge：buddy 
 
@@ -327,5 +397,18 @@ slub算法，实现两层架构的高效内存单元分配，第一层是基于�
 #### 扩展练习Challenge：硬件的可用物理内存范围的获取方法（思考题）
   - 如果 OS 无法提前知道当前硬件的可用物理内存范围，请问你有何办法让 OS 获取可用物理内存范围？
 
+**1. BIOS/UEFI 提供的信息**
+在系统启动时，BIOS（基本输入输出系统）或 UEFI（统一可扩展固件接口）会对系统进行自检，并识别可用的物理内存。这些信息会存储在特定的内存映射中。
+
+- ACPI（高级配置和电源接口）：ACPI 规范定义了一种标准接口，用于描述系统硬件和电源管理。操作系统可以通过读取 ACPI 表（如 ACPI_MEMORY_MAP）来获取内存的具体范围，包括保留和可用内存。
+
+- EFI 内存表：如果系统使用 UEFI，操作系统可以调用 UEFI 提供的函数获取内存映射信息。UEFI 通过 GetMemoryMap 函数返回当前可用和保留内存区域的信息。
+
+**2. 内存管理单元 (MMU)**
+现代计算机使用 MMU 来进行虚拟地址到物理地址的转换。MMU 维护一个页面表，其中记录了各个虚拟地址与物理内存的映射。
+
+- 物理内存检测：操作系统可以通过检查 MMU 的状态，了解哪些物理地址被映射或使用。通过分析页面表的内容，操作系统能够确定哪些物理内存是可用的。
+
+- 内存保护和管理：MMU 还可以帮助操作系统保护内存区域，防止不合法的访问，确保系统稳定。
 
 > Challenges是选做，完成Challenge的同学可单独提交Challenge。完成得好的同学可获得最终考试成绩的加分。
