@@ -1,3 +1,4 @@
+
 #ifndef __LIBS_DEFS_H__
 #define __LIBS_DEFS_H__
 
@@ -75,4 +76,3 @@ typedef size_t ppn_t;
     ((type *)((char *)(ptr) - offsetof(type, member)))
 
 #endif /* !__LIBS_DEFS_H__ */
-
