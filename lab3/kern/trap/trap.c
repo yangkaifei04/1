@@ -12,6 +12,7 @@
 #include <riscv.h>
 #include <sbi.h>
 
+volatile size_t num=0;
 #define TICK_NUM 100
 
 static void print_ticks() {
@@ -150,7 +151,11 @@ void interrupt_handler(struct trapframe *tf) {
             clock_set_next_event();
             if (++ticks % TICK_NUM == 0) {
                 print_ticks();
+                num++; //打印次数加一
             }
+            else if(num == 10){
+            	sbi_shutdown(); //当打印次数为10时，调用<sbi.h>中的关机函数关机
+	    }
             break;
         case IRQ_H_TIMER:
             cprintf("Hypervisor software interrupt\n");
@@ -241,6 +246,8 @@ void exception_handler(struct trapframe *tf) {
                 panic("handle pgfault failed. %e\n", ret);
             }
             break;
+            
+
         default:
             print_trapframe(tf);
             break;
